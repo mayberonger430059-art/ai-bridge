@@ -11,7 +11,7 @@
 | opencode | `opencode v2.1.4` | `C:\Users\mr\AppData\Local\Programs\@opencodedesktop\resources\opencode-cli.exe` | `opencode-cli.exe --version` |
 | codex | `codex-cli 0.164.0-alpha.11.1` | `C:\Users\mr\.codex\.sandbox-bin\codex.exe` | `codex.exe --version` |
 | node | `v24.14.0` | `D:\Program Files\nodejs\node.exe` | `node --version` |
-| git | `2.53.0.windows.2` | PATH | `git --version` |
+| git | `2.53.0.windows.2` | `D:\Program Files\Git\cmd\git.exe` | `git --version` |
 
 `node src/doctor.js` 会把上面两行原样打印出来，并在方括号里带上**实际探测的二进制路径**
 （`[C:\...\opencode-cli.exe]`）：PATH 与 `executorPaths` 可能指向不同安装，
@@ -52,9 +52,22 @@
 2. **换二进制**，然后重开终端（PATH 改动不会进已开的进程）。
 3. **跑 doctor**：`node src/doctor.js`。要求 `opencode CLI available` 为 PASS 且版本号是新的。
    FAIL 时不要往下走：先看 detail 里是「找不到」还是「不是 opencode」。
-4. **只读烟测**（一次真实调用，不写文件）：在 `D:\AI-Bridge\test-workdir` 下跑一个
-   `WriteMode=read-only` 的 opencode 任务，确认 `outcome=done`、Tokens 可解析。
-5. **通过了才接真实业务任务**。没通过就回退到第 1 节记录的旧路径，把新版本号与报错写进本文件再讨论。
+4. **升级验收（两项，分开判定，不能互相替代）**
+
+   **4a. OpenCode 功能烟测**（一次真实调用）：在 `D:\AI-Bridge\test-workdir` 下跑一个 opencode 任务，
+   确认桥接调用能正常执行、`outcome=done`、Tokens 可解析。
+   **本步只证明「能跑通、输出能解析」，不验证只读安全**：当前 OpenCode 执行器没有强制只读沙箱，
+   `WriteMode=read-only` 不能保证禁止写入（依据见第 2 节：opencode v2.1.4 的 `run` 没有只读/沙箱类参数）。
+
+   **4b. Codex 只读安全测试**（负向，一次真实调用）：用 Codex 的 `--sandbox read-only`，在隔离测试目录
+   跑一个**明确要求创建文件**的提示词。
+   - 通过条件：文件**确实没有生成**，并有证据表明写入被阻止。
+   - 文件一旦生成即 **FAIL**，不要接真实业务任务。
+   - **不以 `outcome=done` 作为通过条件**：正确阻止写入也可能让任务以失败结束；
+     判定看的是「文件未生成 + 写入被阻止的证据」，不是 CLI 退出码。
+
+5. **两项都通过才接真实业务任务**：4a 通过只说明该执行器能跑通，4b 通过只说明 Codex 的只读边界有效；
+   两者验证的执行器不同，不能互相替代。没通过就回退到第 1 节记录的旧路径，把新版本号与报错写进本文件再讨论。
 
 **不要**升级完直接跑真实任务，也**不要**在报错后自动换 `opencodeMode` 重试——会重复扣费，
 而且第二次失败的原因会被第一次的噪音盖住。改配置后由人重新 `Queued`。
