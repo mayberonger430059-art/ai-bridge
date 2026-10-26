@@ -76,9 +76,12 @@
 下的行为、长 prompt 经 stdin 的 Windows 端到端闭环、断电后
 陈旧锁自愈。
 
-## 未推送
+## 已推送
 
-本次落地只改本地 `~/workspace/ai-bridge/`，**尚未推送到 GitHub**。
-待用户确认后，以一次更新 commit 推送到同一仓库
-（mayberonger430059-art/ai-bridge，main），不混进 v0.1 基线
-commit 246a9fef。推送前须按同步基线做分歧检查。
+本次落地已于 2026-10-26 推送到同一仓库
+（mayberonger430059-art/ai-bridge，main），更新 commit
+06fa1ceef23d50f4debb2118b6795b869f898cd3，不混进 v0.1 基线
+commit 246a9fef。推送前已核对：分支头仍为基线 SHA、无其他
+写入者分歧、新路径在远端不存在、全部文件 UTF-8 且无符号链接；
+推送后已回读主分支头与 `src/safepath.js`、`docs/claude-review-landing.md`
+与本地一致。
