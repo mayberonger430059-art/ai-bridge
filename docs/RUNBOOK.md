@@ -11,7 +11,7 @@
 | opencode | `opencode v2.1.4` | `C:\Users\mr\AppData\Local\Programs\@opencodedesktop\resources\opencode-cli.exe` | `opencode-cli.exe --version` |
 | codex | `codex-cli 0.164.0-alpha.11.1` | `C:\Users\mr\.codex\.sandbox-bin\codex.exe` | `codex.exe --version` |
 | node | `v24.14.0` | `D:\Program Files\nodejs\node.exe` | `node --version` |
-| git | `2.53.0.windows.2` | `D:\Program Files\Git\cmd\git.exe` | `git --version` |
+| git | `2.53.0.windows.2` | `D:\Program Files\Git\cmd\git.exe` | `& 'D:\Program Files\Git\cmd\git.exe' --version` |
 
 `node src/doctor.js` 会把上面两行原样打印出来，并在方括号里带上**实际探测的二进制路径**
 （`[C:\...\opencode-cli.exe]`）：PATH 与 `executorPaths` 可能指向不同安装，
@@ -55,7 +55,7 @@
 4. **升级验收（两项，分开判定，不能互相替代）**
 
    **4a. OpenCode 功能烟测**（一次真实调用）：在 `D:\AI-Bridge\test-workdir` 下跑一个 opencode 任务，
-   确认桥接调用能正常执行、`outcome=done`、Tokens 可解析。
+   确认桥接调用能正常执行、`outcome=done`；Tokens 按 CLI 上报解析，无 usage 则如实记 `unknown`，不估算。
    **本步只证明「能跑通、输出能解析」，不验证只读安全**：当前 OpenCode 执行器没有强制只读沙箱，
    `WriteMode=read-only` 不能保证禁止写入（依据见第 2 节：opencode v2.1.4 的 `run` 没有只读/沙箱类参数）。
 
@@ -75,7 +75,9 @@
 ## 4. 回退
 
 `opencodeMode` 有 `run|standalone|print` 三档，换档属于配置改动，不属升级：
-先跑 doctor，再按第 3 节第 4 步做只读烟测。v2 上 `print` 已知不可用，不要拿它当回退档。
+先跑 doctor，再按第 3 节第 4a 步验证 OpenCode 功能；若同时变更 Codex 版本或沙箱配置，
+还须独立执行第 4b 步的 Codex 只读安全测试。两者不能互相替代。
+v2 上 `print` 已知不可用，不要拿它当回退档。
 
 如果新版本连 `run --format json` 都不认，结论是**不要接这个版本**，
 把 `executorPaths.opencode` 指回旧安装并记录，而不是改代码去猜新 flag。
@@ -109,4 +111,3 @@
    stderr 为空，桥只能回写 `executor exited with code 1`。
    另外同名任务当天复用同一个 run 目录，重试会覆盖上一次的 `stdout.log`，
    失败那次的原始输出要靠这份 service 日志才找得回来。
-
