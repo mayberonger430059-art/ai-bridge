@@ -1,0 +1,1 @@
+{"allowedExecutors":["opencode","codex"],"allowedWorkdirs":["D:\\AI-Bridge\\test-workdir"],"codexSandboxReadOnly":"read-only","codexSandboxWrite":"workspace-write","dataDir":"data","maxConcurrent":1,"maxRetries":1,"opencodeMode":"run","pollIntervalMs":30000,"protectedPaths":["D:\\yangyang_data"],"timeoutMs":1800000,"useCodingAgentRunner":false}

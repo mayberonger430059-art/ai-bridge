@@ -1,0 +1,1 @@
+{"approval":"Approved","executor":"dryrun","prompt":"Dry-run plumbing test: write the AI_BRIDGE_DRYRUN_OK.txt marker and report Done. No model call.","taskId":"BR-DRYRUN-001","title":"AI Bridge dry-run plumbing test","workdir":"D:\\AI-Bridge\\test-workdir","writeMode":"write"}
