@@ -84,6 +84,12 @@ export class NotionClient {
     const blocks = await this.request(`/blocks/${pageId}/children?page_size=100`, "GET");
     const lines = [];
     for (const block of blocks.results ?? []) {
+      // appendReport separates the human-written instruction from everything the
+      // bridge appends by a divider. Everything after it is execution history,
+      // not prompt: feeding it back made a re-queued task read its own past
+      // report (e.g. "Approval is not 'Approved'") and act on it.
+      // Pages without a divider keep the old read-everything behaviour.
+      if (block.type === "divider") break;
       const rich = block[block.type]?.rich_text;
       const text = plainText(rich);
       if (text.trim()) lines.push(text);
@@ -98,6 +104,26 @@ export class NotionClient {
   }
 
   async appendReport(pageId, lines) {
+    // Mark the boundary between the task instruction and the report before
+    // appending anything, so getPrompt can stop at it. Idempotent: an existing
+    // divider means the boundary is already there. The scan follows
+    // pagination because a long-lived page returns at most 100 blocks per page.
+    let dividerSeen = false;
+    let cursor;
+    do {
+      const query = cursor ? `?page_size=100&start_cursor=${cursor}` : "?page_size=100";
+      const page = await this.request(`/blocks/${pageId}/children${query}`, "GET");
+      if ((page.results ?? []).some((block) => block.type === "divider")) {
+        dividerSeen = true;
+        break;
+      }
+      cursor = page.has_more ? page.next_cursor : undefined;
+    } while (cursor);
+    if (!dividerSeen) {
+      await this.request(`/blocks/${pageId}/children`, "PATCH", {
+        children: [{ divider: {}, object: "block", type: "divider" }],
+      });
+    }
     // Notion caps a block append at 100 children; chunk defensively.
     const children = lines.filter(Boolean).map((line) => ({
       object: "block",

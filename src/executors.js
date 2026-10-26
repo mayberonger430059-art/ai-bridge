@@ -94,10 +94,11 @@ function extractTokens(text) {
     if (!trimmed.startsWith("{")) continue;
     try {
       const obj = JSON.parse(trimmed);
-      const usage = obj.usage ?? obj.token_usage ?? obj.tokens ?? obj.result?.usage ?? null;
+      const usage =
+        obj.usage ?? obj.token_usage ?? obj.tokens ?? obj.part?.tokens ?? obj.result?.usage ?? null;
       if (usage && typeof usage === "object") {
-        const i = usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? 0;
-        const o = usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? 0;
+        const i = usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.input ?? 0;
+        const o = usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.output ?? 0;
         if (Number(i) || Number(o)) {
           input += Number(i) || 0;
           output += Number(o) || 0;
@@ -109,10 +110,12 @@ function extractTokens(text) {
   if (!found) {
     try {
       const obj = JSON.parse(text);
-      const usage = obj?.usage ?? obj?.result?.usage ?? null;
+      const usage = obj?.usage ?? obj?.part?.tokens ?? obj?.result?.usage ?? null;
       if (usage) {
-        input = Number(usage.input_tokens ?? usage.prompt_tokens ?? 0) || 0;
-        output = Number(usage.output_tokens ?? usage.completion_tokens ?? 0) || 0;
+        input =
+          Number(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.input) || 0;
+        output =
+          Number(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.output) || 0;
         found = Boolean(input || output);
       }
     } catch {}
@@ -159,22 +162,24 @@ export async function executeTask({ config, task, runDir, onPid }) {
   let stdinText;
   if (task.executor === "codex") {
     const sandbox = task.writeMode === "write" ? config.codexSandboxWrite : config.codexSandboxReadOnly;
-    command = "codex";
+    command = config.executorPaths?.codex || "codex";
     args = ["exec", "--json", "--sandbox", sandbox, "-C", task.workdir];
     if (before === null) args.push("--skip-git-repo-check");
     args.push("-"); // prompt from stdin
     stdinText = task.prompt;
   } else if (task.executor === "opencode") {
-    command = "opencode";
+    command = config.executorPaths?.opencode || "opencode";
     if (config.opencodeMode === "standalone") {
-      args = ["run", "--standalone", "--format", "json", "--dir", task.workdir, task.prompt];
+      args = ["run", "--standalone", "--format", "json", task.prompt];
     } else if (config.opencodeMode === "print") {
       args = ["-p", task.prompt, "-f", "json", "-q"];
     } else {
-      // Verified against opencode 1.19.4: run [message..] --format json --dir <dir>.
-      // Newer opencode 2.x uses the same run shape with --standalone; if --format
-      // is rejected on the local install, change opencodeMode, do not auto-retry.
-      args = ["run", "--format", "json", "--dir", task.workdir, task.prompt];
+      // opencode 2.x removed the --dir flag: the working directory reaches the
+      // child only via the spawn cwd (see runProcess below), so no --dir is
+      // appended. Verified against local opencode v2.1.4: run --format json
+      // <prompt>. If --format is rejected on the local install, change
+      // opencodeMode, do not auto-retry.
+      args = ["run", "--format", "json", task.prompt];
     }
   } else {
     throw new Error(`unknown executor: ${task.executor}`);

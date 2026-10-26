@@ -31,6 +31,14 @@
 - Title、TaskID、Executor、Workdir、WriteMode、Approval、Status=`Queued`
 - **页面正文（body）写完整任务指令**——桥接服务读 body 作为 prompt，
   不要只把指令塞进某个属性里（属性会被截断）。
+- ⚠️ **正文里不要用分隔线（divider）做排版**。桥接服务用 divider 划分
+  「指令区」和「桥接服务自己追加的报告区」：读 prompt 时**读到第一条 divider 就停**。
+  如果你自己在指令中插了 divider，它**后面**的内容不会被当成指令执行——
+  而且不会有任何报错，表现为「任务跑了但后半段要求没做」。要分段请用标题或空行。
+- ⚠️ **这条 divider 是桥接服务自己插的**（第一次写回执时，包括 `NeedsApproval`
+  门禁提示）。所以「任务被拦下 → 去正文里补充说明 → 点 Approved」这条流程
+  **不生效**：补充说明会落在 divider 之后被跳过，任务仍按旧指令跑。
+  要改指令，请改 divider **以上**的内容，或新建一行任务。
 
 状态机（只有桥接服务和人工能改 Status，ChatGPT/Muse 只负责发 Queued 和读结果）：
 ```

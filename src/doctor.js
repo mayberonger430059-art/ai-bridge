@@ -7,11 +7,21 @@ import { loadConfig } from "./config.js";
 // and never writes outside data/ (it only reads config/.env presence).
 function runVersion(command, args) {
   return new Promise((resolve) => {
-    const child = execFile(command, args, { timeout: 15000, windowsHide: true }, (err, stdout, stderr) => {
-      const out = String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "";
-      resolve(err ? { found: false, detail: out || err.message } : { detail: out, found: true });
-    });
-    child.stdin?.end();
+    let child;
+    try {
+      child = execFile(command, args, { timeout: 15000, windowsHide: true }, (err, stdout, stderr) => {
+        const out = String(stdout || stderr || "").trim().split(/\r?\n/)[0] || "";
+        resolve(err ? { found: false, detail: out || err.message } : { detail: out, found: true });
+      });
+      child.stdin?.end();
+    } catch (err) {
+      // execFile throws SYNCHRONOUSLY for some targets — e.g. a .bat/.cmd path on
+      // Windows gives EINVAL, because execFile cannot exec a script directly and
+      // does not go through the shell like exec/spawn with shell:true would.
+      // A diagnostic tool must never die here: report this one check as failed
+      // and let the remaining checks print.
+      resolve({ detail: `${err.code ?? "ERROR"}: ${err.message}`, found: false });
+    }
   });
 }
 
@@ -28,10 +38,12 @@ async function main() {
   for (const dir of config.allowedWorkdirs) {
     checks.push({ check: `workdir exists: ${dir}`, detail: fs.existsSync(dir) ? "exists" : "MISSING — create it or fix config.json", ok: fs.existsSync(dir) });
   }
-  const codex = await runVersion("codex", ["--version"]);
-  checks.push({ check: "codex on PATH", detail: codex.detail, ok: codex.found });
-  const opencode = await runVersion("opencode", ["--version"]);
-  checks.push({ check: "opencode on PATH", detail: opencode.detail, ok: opencode.found });
+  const codexCommand = config.executorPaths?.codex || "codex";
+  const codex = await runVersion(codexCommand, ["--version"]);
+  checks.push({ check: "codex CLI available", detail: codex.detail, ok: codex.found });
+  const opencodeCommand = config.executorPaths?.opencode || "opencode";
+  const opencode = await runVersion(opencodeCommand, ["--version"]);
+  checks.push({ check: "opencode CLI available", detail: opencode.detail, ok: opencode.found });
   const git = await runVersion("git", ["--version"]);
   checks.push({ check: "git on PATH (for changed-files diff)", detail: git.detail, ok: git.found });
   if (!codex.found && !opencode.found) {

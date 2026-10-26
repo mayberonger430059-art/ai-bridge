@@ -4,3 +4,10 @@ config.json
 data/
 *.log
 .DS_Store
+.agent-runs/
+# Test scratch dirs: the README tells you to create test-workdir inside the repo.
+# Ignoring them keeps `git add -A` from committing dry-run markers and agent output.
+test-workdir/
+test-workdir-*/
+# Local agent handoff notes (environment-specific paths, not product source).
+HANDOFF-CODEX.md

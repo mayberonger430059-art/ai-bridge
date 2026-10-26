@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { assertWorkdirAllowed, isInsideDir as safepathIsInsideDir } from "./safepath.js";
+import { assertWorkdirAllowed, isInsideDir } from "./safepath.js";
 
 // isInsideDir is now the realpath version from safepath.js (review item 1):
 // symlinks inside an allowed dir can no longer escape by string prefix.
-export { safepathIsInsideDir as isInsideDir };
+export { isInsideDir };
 
 const SECRET_KEYS = ["NOTION_API_KEY", "API_KEY", "TOKEN", "SECRET"];
 
@@ -52,6 +52,7 @@ export function loadConfig(root = process.cwd()) {
     notionDatabaseId: process.env.NOTION_DATABASE_ID || "",
     notionVersion: process.env.NOTION_VERSION || "2022-06-28",
     opencodeMode: fileConfig.opencodeMode ?? "run", // run | standalone | print
+    executorPaths: fileConfig.executorPaths ?? {},
     pollIntervalMs: Number(fileConfig.pollIntervalMs ?? 30000),
     protectedPaths: fileConfig.protectedPaths ?? [],
     timeoutMs: Number(fileConfig.timeoutMs ?? 1800000),
@@ -73,6 +74,15 @@ export function loadConfig(root = process.cwd()) {
   }
   if (!["run", "standalone", "print"].includes(config.opencodeMode)) {
     errors.push(`opencodeMode must be run|standalone|print, got: ${config.opencodeMode}`);
+  }
+  if (!config.executorPaths || typeof config.executorPaths !== "object" || Array.isArray(config.executorPaths)) {
+    errors.push("executorPaths must be an object with optional codex/opencode absolute executable paths");
+  } else {
+    for (const [name, executable] of Object.entries(config.executorPaths)) {
+      if (!["codex", "opencode"].includes(name) || typeof executable !== "string" || !path.isAbsolute(executable) || !fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
+        errors.push(`executorPaths.${name} must point to an existing absolute executable file`);
+      }
+    }
   }
   if (!Number.isFinite(config.timeoutMs) || config.timeoutMs < 60000) {
     errors.push("timeoutMs must be >= 60000");

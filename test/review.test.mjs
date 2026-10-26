@@ -22,7 +22,8 @@ test("review item 1: symlink escape is blocked by realpath", () => {
   const outside = path.join(root, "outside");
   fs.mkdirSync(allowed, { recursive: true });
   fs.mkdirSync(outside, { recursive: true });
-  fs.symlinkSync(outside, path.join(allowed, "link"), "dir");
+  fs.symlinkSync(outside, path.join(allowed, "link"), process.platform === "win32" ? "junction" : "dir");
+  assert.equal(fs.lstatSync(path.join(allowed, "link")).isSymbolicLink(), true);
   assert.equal(isInsideDir(path.join(allowed, "link", "secret.txt"), allowed), false);
   assert.equal(isInsideDir(path.join(allowed, "ok"), allowed), true);
   assert.equal(isInsideDir(path.join(root, "dir-evil"), path.join(root, "dir")), false);

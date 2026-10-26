@@ -21,6 +21,9 @@ ChatGPT / Muse（网页版）          Windows 本机                Notion
   所以 `npm install` 不是必需的；只有 Phase 2 试 coding-agent-runner 时才需要装包）
 - Codex CLI（本机已装，版本以 `codex --version` 为准）
 - OpenCode CLI（本机已装，版本以 `opencode --version` 为准）
+- 若 CLI 不在 PATH，在本机 `config.json` 设置 `executorPaths` 为可执行文件的绝对路径，例如
+  `{"codex":"C:\\Users\\mr\\.codex\\.sandbox-bin\\codex.exe","opencode":"C:\\Users\\mr\\AppData\\Local\\Programs\\@opencodedesktop\\resources\\opencode-cli.exe"}`。
+  `doctor` 和实际任务会使用同一路径；不需要复制或重命名 OpenCode 二进制文件。
 - Git（用于执行前后 `git status` 核对改动文件；非 git 目录时如实写“无 diff”）
 - GPU 不参与本服务：桥接服务本身不跑模型，模型在 Codex/OpenCode 各自的账号里跑；
   RTX 2080 Ti 与否不影响本服务能否启动。
@@ -46,7 +49,7 @@ mkdir test-workdir
 
 # 5. 干跑测试（不跑模型、不连 Notion，证明整条管线通）
 .\scripts\test-dryrun.bat
-# 通过标志：test-workdir\AI_BRIDGE_DRYRUN_OK.txt 出现，data\runs\ 下有 result.json 且 outcome=done
+# 通过标志：test-workdir\AI_BRIDGE_DRYRUN_OK.txt 出现，data\runs\ 下的 result.json 有 status=Done（stdout 的 outcome=done）
 
 # 6. 真实闭环（先 OpenCode，再 Codex，各一次）
 #    a. 在 Notion 按 examples\task-opencode-test.md 建一行，Status=Queued
@@ -88,7 +91,11 @@ node --test test\*.test.mjs
 `config.json` 里 `opencodeMode` 三档，默认 `run`：
 - `run`：`opencode run --format json <prompt>`
 - `standalone`：`opencode run --standalone --format json <prompt>`
-- `print`：`opencode -p <prompt> -f json -q`（旧版形态）
+- `print`：`opencode -p <prompt> -f json -q`（**仅 opencode 1.x**。本机 v2.1.4 上 `-p` / `-q` 都不存在，
+  `-f` 在 v2 是 `--file`（附加文件）而不是 format —— 选这一档会得到「把名为 json 的文件附上」+ 未知 flag 的双重报错。
+  v2 请用 `run` 或 `standalone`）
+
+**已在 opencode v2.1.4 实测**：`run --format json` 可用；`--dir` 已被移除（工作目录通过 spawn 的 cwd 传递）。
 
 先跑 `opencode run --help` 看本机实际支持的 flag 再定；报错后**不要自动换档重试**
 （会重复扣费），改配置后人工重新 Queued。

@@ -89,6 +89,21 @@ async function runOneTask({ config, notion, task, ledger }) {
   if (!tracker.canAttempt()) {
     const budgetError = `attempt budget exhausted (Notion Attempts=${tracker.total}, hard cap=3). Reset Attempts in Notion to re-run this task.`;
     log(`budget: ${task.taskId}: ${budgetError}`);
+    // No executor was invoked here, so this is a terminal outcome, not a crash.
+    // Land it in the ledger BEFORE returning: leaving status "running" made
+    // recoverRunning() on the next start treat the task as interrupted and
+    // overwrite this accurate budget error in Notion with the vague
+    // "Bridge restarted while this task was running" message.
+    if (task.notionPageId) {
+      entry.status = "failed";
+      entry.error = budgetError;
+      // No executor ran, so runDir (computed at the top of this function) was
+      // never created -- mkdirSync happens inside executors.executeTask. Keep
+      // the ledger honest: it is the idempotency anchor, so a pointer to a
+      // directory that cannot exist is worse than no pointer. Drop it.
+      entry.runDir = null;
+      saveLedger(config.dataDir, ledger);
+    }
     if (notion) {
       await notion.updatePage(task.notionPageId, {
         Error: richText(budgetError),
@@ -220,7 +235,7 @@ async function main() {
   const args = process.argv.slice(2);
   const once = args.includes("--once");
   const poll = args.includes("--poll");
-  const localTaskArg = args[args.indexOf("--local-task") + 1];
+  const localTaskArg = args.includes("--local-task") ? args[args.indexOf("--local-task") + 1] : null;
   const { config, errors } = loadConfig();
   if (errors.length) {
     console.error("Config errors:");
