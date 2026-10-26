@@ -2,6 +2,11 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { redact } from "./config.js";
+import { killProcessTree } from "./killtree.js";
+import { extractResult } from "./parse-output.js";
+
+export { killProcessTree };
+export { killTreeByPid } from "./killtree.js";
 
 // Direct official CLI execution (v1 default). No coding-agent-runner, no ACP, no server:
 //   Codex:   codex exec --json --sandbox <read-only|workspace-write> -   (prompt on stdin, avoids Windows 32k cmdline limit)
@@ -15,7 +20,15 @@ function runProcess(command, args, { cwd, timeoutMs, stdinText, stdoutPath, stde
     const stderrStream = fs.createWriteStream(stderrPath);
     let child;
     try {
-      child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      child = spawn(command, args, {
+        cwd,
+        // Review item 2: POSIX detached so the process-group kill in
+        // killtree.js can reap grandchildren. Windows ignores detached
+        // for grouping; taskkill /T handles the tree there.
+        detached: process.platform !== "win32",
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
     } catch (err) {
       resolve({ code: 1, error: String(err), killed: false, pid: null, timedOut: false });
       return;
@@ -28,26 +41,28 @@ function runProcess(command, args, { cwd, timeoutMs, stdinText, stdoutPath, stde
     }
     let timedOut = false;
     let killed = false;
+    let hardTimer = null;
     const timer = setTimeout(() => {
       timedOut = true;
       killed = true;
-      try {
-        child.kill("SIGTERM");
-      } catch {}
-      setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-      }, 5000);
+      // Review item 2: graceful stop, then forced tree kill, then a hard
+      // deadline so a stuck/zombie child can never hang the bridge forever.
+      void killProcessTree(child, { graceMs: 5000, hardMs: 15000 });
+      hardTimer = setTimeout(() => {
+        resolve({ code: 124, error: "executor did not exit after hard kill deadline", killed, pid, timedOut });
+      }, 20000);
+      hardTimer.unref?.();
     }, timeoutMs);
     child.stdout.pipe(stdoutStream);
     child.stderr.pipe(stderrStream);
     child.on("error", (err) => {
       clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
       resolve({ code: 1, error: redact(String(err)), killed, pid, timedOut });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
       resolve({ code: code ?? 1, error: "", killed, pid, timedOut });
     });
     if (stdinText !== undefined) {
@@ -58,17 +73,8 @@ function runProcess(command, args, { cwd, timeoutMs, stdinText, stdoutPath, stde
   });
 }
 
-export function killProcessTree(pid) {
-  // Best effort only. On Windows, taskkill /T kills the tree; elsewhere SIGTERM first.
-  if (!pid) return;
-  if (process.platform === "win32") {
-    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], () => {});
-  } else {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {}
-  }
-}
+// killProcessTree (child version) and killTreeByPid (PID version, for the
+// bridge cancel watcher) now live in killtree.js and are re-exported above.
 
 function gitStatus(cwd) {
   return new Promise((resolve) => {
@@ -191,10 +197,13 @@ export async function executeTask({ config, task, runDir, onPid }) {
     const afterLines = after ? after.split(/\r?\n/) : [];
     changedFiles = afterLines.length ? afterLines.join("\n") : "(no changed files)";
   }
-  // Final agent message: for Codex --json the last JSONL line's text/message is the
-  // result; for OpenCode JSON it is the wrapped response. Keep it simple and honest:
-  // store the raw tail as the output and let the Notion report quote it, truncated.
-  const output = redact(stdoutText).slice(-8000);
+  // Review item 3: prefer the last structured agent message when the CLI
+  // output parses as JSONL/JSON; fall back to the raw tail, marked by
+  // extractResult's outputSource. Tokens still come from extractTokens
+  // (summed across events), not from extractResult's last-only usage.
+  const parsed = extractResult(stdoutText);
+  const output =
+    parsed.outputSource === "structured" ? redact(parsed.output).slice(0, 8000) : redact(parsed.output).slice(-8000);
   const error = result.timedOut
     ? `timeout after ${config.timeoutMs}ms (child killed)`
     : result.code !== 0

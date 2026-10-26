@@ -46,7 +46,14 @@ export class NotionClient {
     });
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`Notion ${method} ${pathname} -> ${res.status}: ${redact(text).slice(0, 500)}`);
+      // Review item 4: fail loudly on a suspected data-source model error
+      // instead of silently changing version or data. The doctor
+      // --check-notion probe lists the actual data sources.
+      const dataSourceHint =
+        res.status === 400 && /data.?source|2025-09-03/i.test(text)
+          ? " Suspected data-source model mismatch (pinned Notion-Version is 2022-06-28; a multi-source database cannot be queried by database id). Run doctor --check-notion to list its data sources; do not silently rewrite data."
+          : "";
+      throw new Error(`Notion ${method} ${pathname} -> ${res.status}: ${redact(text).slice(0, 500)}${dataSourceHint}`);
     }
     return text ? JSON.parse(text) : {};
   }

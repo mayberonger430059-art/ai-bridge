@@ -23,6 +23,27 @@
   工具表里虽然列出了 spawn-session，但准入表里没有它，实测也证实被挡。
 - 因此：**Claude 尚未真正审过代码，本文件不伪装成评审已完成。**
 
+## 更新：2026-10-26 09:46 重连后重试，换了一个报错
+
+- 用户重连后，助手侧 status 已变为 connected、authenticated=true，
+  说明重连本身成功了，之前 403 的授权问题已过。
+- 但重试 notion-spawn-session 改为 400 validation_error：
+  “Agent is not published or configured.”
+  request_id：bf9dd82d-7c86-4c55-8c91-b2173ae7a9b7
+- 含义：spawn-session 要求的是“已发布的 Custom Agent”，而工作区里
+  唯一搜到的 Claude（agent://0192911f-599d-8131-92f3-00038d7b26f7/4032911f-599d-80a5-ad8d-0092112cf15d，
+  图标为 /images/app-packages/claude.svg）看起来是内置应用 agent，
+  并未以可供 MCP 发起会话的方式发布/配置。
+- 结论：经 Muse 连接器直接发起 Claude 会话这条路，对这个 agent 目前走不通，
+  再重试同一个 spawn 也只会得到同一个 400，不必反复试。
+
+## 更新：2026-10-26 10:25 评审落地（本地，未推送）
+
+- 用户上传 `ai-bridge-review.zip`，助手已核查、适配、落地，详见
+  `docs/claude-review-landing.md`。本地验证：全部测试 11/11 通过，
+  dry-run outcome=done，第二实例锁拦截生效。Windows 真机项仍待实测。
+- 推送待用户确认，届时以更新 commit 推到同一仓库，不混进基线。
+
 ## 解锁办法（二选一）
 
 A. 用户在 Muse / MCP 网关当初添加 Notion 的地方重新连接 Notion，

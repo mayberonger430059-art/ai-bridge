@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { assertExecutor, assertWorkdir, loadConfig, redact } from "./config.js";
-import { executeTask, formatTokens, killProcessTree } from "./executors.js";
+import { executeTask, formatTokens } from "./executors.js";
+import { killTreeByPid } from "./killtree.js";
+import { AttemptTracker } from "./attempts.js";
+import { acquireSingleInstanceLock } from "./lock.js";
+import { evaluateApprovalGate } from "./gate.js";
 import { isPidAlive, loadLedger, saveLedger } from "./ledger.js";
 import { NotionClient, numberValue, richText, select } from "./notion.js";
 
@@ -46,7 +50,7 @@ async function recoverRunning(config, notion) {
 
 async function runOneTask({ config, notion, task, ledger }) {
   // Approval gate (requirement 4): write tasks need an explicit Approved in Notion.
-  if (task.writeMode === "write" && task.approval !== "Approved") {
+  if (evaluateApprovalGate(task) === "needs-approval") {
     log(`gate: ${task.taskId} needs approval (WriteMode=write, Approval=${task.approval || "empty"}), moving to NeedsApproval, NOT executing`);
     if (notion) {
       await notion.updatePage(task.notionPageId, { Status: select("NeedsApproval") });
@@ -62,8 +66,14 @@ async function runOneTask({ config, notion, task, ledger }) {
   const executor = assertExecutor(config, task.executor);
   const fullTask = { ...task, executor, workdir };
   const runDir = runDirFor(config, task.taskId || task.notionPageId || "local");
+  // Review item 5: Attempts now equals real executor invocations. The
+  // tracker is created before the loop; next() is called immediately
+  // before each real call, and the total is written back once at the end.
+  // Hard cap 3 across runs: a task already at Attempts=3 will not run
+  // until a human resets Attempts in Notion.
+  const tracker = new AttemptTracker(task.attempts ?? 0, { maxRetries: config.maxRetries, hardCap: 3 });
   const entry = {
-    attempts: (task.attempts ?? 0) + 1,
+    attempts: tracker.total,
     pid: null,
     runDir,
     startedAt: new Date().toISOString(),
@@ -76,7 +86,21 @@ async function runOneTask({ config, notion, task, ledger }) {
   }
 
   let lastError = "";
-  for (let attempt = 1; attempt <= config.maxRetries + 1; attempt++) {
+  if (!tracker.canAttempt()) {
+    const budgetError = `attempt budget exhausted (Notion Attempts=${tracker.total}, hard cap=3). Reset Attempts in Notion to re-run this task.`;
+    log(`budget: ${task.taskId}: ${budgetError}`);
+    if (notion) {
+      await notion.updatePage(task.notionPageId, {
+        Error: richText(budgetError),
+        Status: select("Failed"),
+      });
+    }
+    return { outcome: "failed", error: budgetError };
+  }
+  while (tracker.canAttempt()) {
+    const attempt = tracker.next();
+    entry.attempts = tracker.total;
+    if (task.notionPageId) saveLedger(config.dataDir, ledger);
     let currentPid = null;
     let cancelRequested = false;
     let watcher = null;
@@ -86,7 +110,7 @@ async function runOneTask({ config, notion, task, ledger }) {
           const fresh = await notion.getPage(task.notionPageId);
           if (fresh.status === "Cancelled") {
             cancelRequested = true;
-            killProcessTree(currentPid);
+            killTreeByPid(currentPid);
           }
         } catch {}
       }, 15000);
@@ -109,6 +133,7 @@ async function runOneTask({ config, notion, task, ledger }) {
       log(`cancelled: ${task.taskId}`);
       if (notion) {
         await notion.updatePage(task.notionPageId, {
+          Attempts: numberValue(entry.attempts),
           Error: richText("Cancelled from Notion while running."),
           Status: select("Cancelled"),
         });
@@ -162,11 +187,11 @@ async function runOneTask({ config, notion, task, ledger }) {
 
     lastError = result.error || `executor exited with code ${result.code}`;
     log(`attempt ${attempt} failed: ${task.taskId}: ${lastError.slice(0, 300)}`);
-    if (attempt <= config.maxRetries) {
+    if (tracker.canAttempt()) {
       await sleep(10000 * attempt);
       continue;
     }
-    log(`failed: ${task.taskId} after ${attempt} attempt(s)`);
+    log(`failed: ${task.taskId} after ${tracker.total} attempt(s) (Notion Attempts=${tracker.total})`);
     if (notion) {
       await notion.updatePage(task.notionPageId, {
         Attempts: numberValue(entry.attempts),
@@ -203,6 +228,15 @@ async function main() {
     process.exit(1);
   }
   fs.mkdirSync(config.dataDir, { recursive: true });
+
+  // Review item 6: single-instance PID lock. A second bridge (double-clicked
+  // .bat, stray poller) exits instead of racing the same Notion queue.
+  // Stale locks from dead owners are reclaimed by lock.js.
+  const lock = acquireSingleInstanceLock(path.join(config.dataDir, "bridge.lock"));
+  if (!lock.ok) {
+    console.error(`[AI-Bridge] another bridge instance is already running (pid=${lock.pid}), exiting.`);
+    process.exit(1);
+  }
 
   if (localTaskArg) {
     const raw = JSON.parse(fs.readFileSync(localTaskArg, "utf8"));

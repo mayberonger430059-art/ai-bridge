@@ -1,5 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertWorkdirAllowed, isInsideDir as safepathIsInsideDir } from "./safepath.js";
+
+// isInsideDir is now the realpath version from safepath.js (review item 1):
+// symlinks inside an allowed dir can no longer escape by string prefix.
+export { safepathIsInsideDir as isInsideDir };
 
 const SECRET_KEYS = ["NOTION_API_KEY", "API_KEY", "TOKEN", "SECRET"];
 
@@ -26,17 +31,6 @@ function loadEnvFile(root) {
     const value = trimmed.slice(eq + 1).trim();
     if (!(key in process.env)) process.env[key] = value;
   }
-}
-
-function normalizeDir(p) {
-  const resolved = path.resolve(p);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-}
-
-export function isInsideDir(candidate, dir) {
-  const c = normalizeDir(candidate);
-  const d = normalizeDir(dir);
-  return c === d || c.startsWith(d + path.sep);
 }
 
 export function loadConfig(root = process.cwd()) {
@@ -90,14 +84,15 @@ export function loadConfig(root = process.cwd()) {
 }
 
 export function assertWorkdir(config, workdir) {
-  const resolved = path.resolve(workdir);
-  if (config.protectedPaths.some((p) => isInsideDir(resolved, p))) {
-    throw new Error(`workdir is inside a protected path: ${resolved}`);
-  }
-  if (!config.allowedWorkdirs.some((d) => isInsideDir(resolved, d))) {
-    throw new Error(`workdir is not registered in allowedWorkdirs: ${resolved}`);
-  }
-  return resolved;
+  // Review item 1, second check: allow-list + protected overlap (both
+  // directions) + symlink components inside the sandbox are rejected.
+  // Allowed roots themselves may be real dirs; a symlink component *inside*
+  // an allowed root pointing outside is what this blocks.
+  return assertWorkdirAllowed(workdir, {
+    allowList: config.allowedWorkdirs,
+    protectedPaths: config.protectedPaths,
+    rejectSymlinks: true,
+  });
 }
 
 export function assertExecutor(config, executor) {

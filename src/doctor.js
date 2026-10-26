@@ -48,6 +48,25 @@ async function main() {
         const notion = new NotionClient({ apiKey: config.notionApiKey, version: config.notionVersion });
         const queued = await notion.queryQueued(config.notionDatabaseId);
         checks.push({ check: "notion connectivity (query Queued)", detail: `ok, ${queued.length} queued`, ok: true });
+        // Review item 4: data-source probe using the existing client (no
+        // second Notion client). A multi-source database cannot be queried
+        // by database id on the pinned version; report it plainly, never
+        // silently rewrite user data or bump the version.
+        try {
+          const db = await notion.request(`/databases/${config.notionDatabaseId}`, "GET");
+          const sources = Array.isArray(db?.data_sources) ? db.data_sources : [];
+          if (sources.length > 1) {
+            checks.push({
+              check: "notion data-source model",
+              detail: `FAIL: ${sources.length} data sources (${sources.map((d) => `${d.name || "?"}=${d.id}`).join(", ")}). Point NOTION_DATABASE_ID at a single-source database.`,
+              ok: false,
+            });
+          } else {
+            checks.push({ check: "notion data-source model", detail: `ok, single source on Notion-Version ${config.notionVersion}`, ok: true });
+          }
+        } catch (probeErr) {
+          checks.push({ check: "notion data-source model", detail: `probe failed (query above still decides): ${String(probeErr.message).slice(0, 200)}`, ok: false });
+        }
       } catch (err) {
         checks.push({ check: "notion connectivity (query Queued)", detail: String(err.message).slice(0, 300), ok: false });
       }
