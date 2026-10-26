@@ -19,8 +19,10 @@ ChatGPT / Muse（网页版）          Windows 本机                Notion
 
 - Node.js >= 20（无任何 npm 依赖：只用 Node 内置 fetch / child_process / fs，
   所以 `npm install` 不是必需的；只有 Phase 2 试 coding-agent-runner 时才需要装包）
-- Codex CLI（本机已装，版本以 `codex --version` 为准）
-- OpenCode CLI（本机已装，版本以 `opencode --version` 为准）
+- Codex CLI（本机已装。当前实测基线 `codex-cli 0.164.0-alpha.11.1`，见 `docs/RUNBOOK.md`）
+- OpenCode CLI（本机已装。当前实测基线 `opencode v2.1.4`，见 `docs/RUNBOOK.md`）
+  升级前先读那份 RUNBOOK：opencode 2.x 删过 `--dir`，doctor 现在会校验版本输出里的执行器身份，
+  「随便一个能跑的可执行文件」不再算 PASS。
 - 若 CLI 不在 PATH，在本机 `config.json` 设置 `executorPaths` 为可执行文件的绝对路径，例如
   `{"codex":"C:\\Users\\mr\\.codex\\.sandbox-bin\\codex.exe","opencode":"C:\\Users\\mr\\AppData\\Local\\Programs\\@opencodedesktop\\resources\\opencode-cli.exe"}`。
   `doctor` 和实际任务会使用同一路径；不需要复制或重命名 OpenCode 二进制文件。
