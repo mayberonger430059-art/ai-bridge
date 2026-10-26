@@ -28,6 +28,42 @@ function plainText(rich) {
   return rich.map((item) => item?.plain_text ?? item?.text?.content ?? "").join("");
 }
 
+// Text of any block regardless of its type, used to look for a run marker without
+// assuming which block type carried it.
+function blockText(block) {
+  if (!block || block.type === "divider") return "";
+  return plainText(block[block.type]?.rich_text);
+}
+
+// A page body is instruction first, then everything the bridge appends. appendReport
+// puts a divider on that boundary, so the prompt is "blocks before the first divider".
+// Feeding the tail back as the prompt made a re-queued task read its own past report
+// (e.g. "Approval is not 'Approved'") and refuse to do the work -- see the T3.5 drill.
+// Pure on purpose: the boundary rule is the part worth testing without a network.
+export function promptFromBlocks(blocks) {
+  const lines = [];
+  let ignoredBlocks = 0;
+  let dividerSeen = false;
+  for (const block of blocks ?? []) {
+    if (dividerSeen) {
+      ignoredBlocks += 1;
+      continue;
+    }
+    if (block.type === "divider") {
+      dividerSeen = true;
+      continue;
+    }
+    const text = plainText(block[block.type]?.rich_text);
+    if (text.trim()) lines.push(text);
+  }
+  return { dividerSeen, ignoredBlocks, lines };
+}
+
+// Bound on how many 100-block pages getPrompt will walk. A page longer than this
+// without a divider is pathological; stopping silently would truncate the
+// instruction, so the caller gets pageCapHit and can complain instead.
+const MAX_PROMPT_BLOCK_PAGES = 20;
+
 export class NotionClient {
   constructor({ apiKey, version }) {
     this.apiKey = apiKey;
@@ -79,46 +115,73 @@ export class NotionClient {
     return parseTaskPage(await this.request(`/pages/${pageId}`, "GET"));
   }
 
+  // Returns { prompt, ignoredBlocks, moreBlocksAfterDivider, pages, pageCapHit }.
+  // It used to return a bare string, which made the divider boundary silent: a task
+  // whose human instructions were added *after* the divider (the gate path below
+  // inserts one before anyone approves) ran on the old instruction with no signal
+  // at all. The caller now gets the count so it can say so out loud.
   async getPrompt(pageId) {
     // Body blocks first; fall back to a Prompt rich_text property if a creator used one.
-    const blocks = await this.request(`/blocks/${pageId}/children?page_size=100`, "GET");
-    const lines = [];
-    for (const block of blocks.results ?? []) {
-      // appendReport separates the human-written instruction from everything the
-      // bridge appends by a divider. Everything after it is execution history,
-      // not prompt: feeding it back made a re-queued task read its own past
-      // report (e.g. "Approval is not 'Approved'") and act on it.
-      // Pages without a divider keep the old read-everything behaviour.
-      if (block.type === "divider") break;
-      const rich = block[block.type]?.rich_text;
-      const text = plainText(rich);
-      if (text.trim()) lines.push(text);
-    }
-    if (lines.length) return lines.join("\n");
-    const page = await this.getPage(pageId);
-    return page.prompt || "";
+    const blocks = [];
+    let cursor;
+    let pages = 0;
+    let moreBlocksAfterDivider = false;
+    let pageCapHit = false;
+    do {
+      const query = cursor ? `?page_size=100&start_cursor=${cursor}` : "?page_size=100";
+      const page = await this.request(`/blocks/${pageId}/children${query}`, "GET");
+      pages += 1;
+      blocks.push(...(page.results ?? []));
+      // Stop as soon as the boundary is on this page: nothing past it is prompt.
+      if (blocks.some((block) => block.type === "divider")) {
+        moreBlocksAfterDivider = Boolean(page.has_more);
+        break;
+      }
+      cursor = page.has_more ? page.next_cursor : undefined;
+      if (cursor && pages >= MAX_PROMPT_BLOCK_PAGES) {
+        pageCapHit = true;
+        cursor = undefined;
+      }
+    } while (cursor);
+    const { ignoredBlocks, lines } = promptFromBlocks(blocks);
+    const prompt = lines.length ? lines.join("\n") : (await this.getPage(pageId)).prompt || "";
+    return { ignoredBlocks, moreBlocksAfterDivider, pageCapHit, pages, prompt };
   }
 
   async updatePage(pageId, properties) {
     return this.request(`/pages/${pageId}`, "PATCH", { properties });
   }
 
-  async appendReport(pageId, lines) {
+  async appendReport(pageId, lines, options = {}) {
     // Mark the boundary between the task instruction and the report before
     // appending anything, so getPrompt can stop at it. Idempotent: an existing
     // divider means the boundary is already there. The scan follows
     // pagination because a long-lived page returns at most 100 blocks per page.
+    //
+    // `runMarker` makes the append idempotent per run: a re-poll after a partial
+    // write (properties landed, report did not) must not append the same report
+    // twice. Its presence means this run's report is already on the page, so the
+    // scan cannot stop at the divider - the report always lives after it.
+    const runMarker = options.runMarker ?? null;
     let dividerSeen = false;
+    let markerSeen = false;
     let cursor;
     do {
       const query = cursor ? `?page_size=100&start_cursor=${cursor}` : "?page_size=100";
       const page = await this.request(`/blocks/${pageId}/children${query}`, "GET");
-      if ((page.results ?? []).some((block) => block.type === "divider")) {
+      const results = page.results ?? [];
+      if (!dividerSeen && results.some((block) => block.type === "divider")) {
         dividerSeen = true;
-        break;
       }
+      if (runMarker && !markerSeen) {
+        markerSeen = results.some((block) => blockText(block).includes(runMarker));
+      }
+      if (dividerSeen && (!runMarker || markerSeen)) break;
       cursor = page.has_more ? page.next_cursor : undefined;
     } while (cursor);
+    if (runMarker && markerSeen) {
+      return { skipped: true, reason: "report-for-this-run-already-present" };
+    }
     if (!dividerSeen) {
       await this.request(`/blocks/${pageId}/children`, "PATCH", {
         children: [{ divider: {}, object: "block", type: "divider" }],

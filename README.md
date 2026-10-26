@@ -24,6 +24,8 @@ ChatGPT / Muse（网页版）          Windows 本机                Notion
 - 若 CLI 不在 PATH，在本机 `config.json` 设置 `executorPaths` 为可执行文件的绝对路径，例如
   `{"codex":"C:\\Users\\mr\\.codex\\.sandbox-bin\\codex.exe","opencode":"C:\\Users\\mr\\AppData\\Local\\Programs\\@opencodedesktop\\resources\\opencode-cli.exe"}`。
   `doctor` 和实际任务会使用同一路径；不需要复制或重命名 OpenCode 二进制文件。
+  这两个消费点都走 `resolveExecutorCommand(config, name)`（`src/config.js`），
+  一处解析、两处使用，`doctor` 报的二进制与实际跑的不可能不一致。
 - Git（用于执行前后 `git status` 核对改动文件；非 git 目录时如实写“无 diff”）
 - GPU 不参与本服务：桥接服务本身不跑模型，模型在 Codex/OpenCode 各自的账号里跑；
   RTX 2080 Ti 与否不影响本服务能否启动。

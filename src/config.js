@@ -115,3 +115,14 @@ export function assertExecutor(config, executor) {
   }
   return executor;
 }
+
+// Single source of truth for "which binary do we actually spawn for this executor".
+// Without it, the four call sites (executors.js and doctor.js, one per executor)
+// each re-implemented `config.executorPaths?.x || "x"`, so doctor could report on a
+// different binary than the one the bridge would run, and reverting one site to a
+// hard-coded name stayed invisible to every test that only reads config.
+// Validation (absolute + exists + isFile) happens in loadConfig; this only picks.
+export function resolveExecutorCommand(config, name) {
+  const pinned = config?.executorPaths?.[name];
+  return typeof pinned === "string" && pinned.trim() ? pinned : name;
+}

@@ -1,7 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { redact } from "./config.js";
+import { redact, resolveExecutorCommand } from "./config.js";
 import { killProcessTree } from "./killtree.js";
 import { extractResult } from "./parse-output.js";
 
@@ -162,13 +162,13 @@ export async function executeTask({ config, task, runDir, onPid }) {
   let stdinText;
   if (task.executor === "codex") {
     const sandbox = task.writeMode === "write" ? config.codexSandboxWrite : config.codexSandboxReadOnly;
-    command = config.executorPaths?.codex || "codex";
+    command = resolveExecutorCommand(config, "codex");
     args = ["exec", "--json", "--sandbox", sandbox, "-C", task.workdir];
     if (before === null) args.push("--skip-git-repo-check");
     args.push("-"); // prompt from stdin
     stdinText = task.prompt;
   } else if (task.executor === "opencode") {
-    command = config.executorPaths?.opencode || "opencode";
+    command = resolveExecutorCommand(config, "opencode");
     if (config.opencodeMode === "standalone") {
       args = ["run", "--standalone", "--format", "json", task.prompt];
     } else if (config.opencodeMode === "print") {
@@ -209,10 +209,14 @@ export async function executeTask({ config, task, runDir, onPid }) {
   const parsed = extractResult(stdoutText);
   const output =
     parsed.outputSource === "structured" ? redact(parsed.output).slice(0, 8000) : redact(parsed.output).slice(-8000);
+  // Spawn failures carry the reason in result.error, not on stderr: a missing binary
+  // used to surface as a bare "executor exited with code 1" with empty stderr, which
+  // named neither the command nor ENOENT. Keep stderr first (it is the executor's own
+  // words), then the spawn error, then the generic line.
   const error = result.timedOut
     ? `timeout after ${config.timeoutMs}ms (child killed)`
     : result.code !== 0
-      ? redact(stderrText).slice(-2000) || `executor exited with code ${result.code}`
+      ? redact(stderrText).slice(-2000) || redact(result.error) || `executor exited with code ${result.code}`
       : result.error;
   return {
     changedFiles,

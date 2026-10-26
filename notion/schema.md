@@ -39,6 +39,14 @@
   门禁提示）。所以「任务被拦下 → 去正文里补充说明 → 点 Approved」这条流程
   **不生效**：补充说明会落在 divider 之后被跳过，任务仍按旧指令跑。
   要改指令，请改 divider **以上**的内容，或新建一行任务。
+  桥接服务现在会**明说**这件事：运行时日志会打印
+  `prompt: <TaskID>: stopped at the divider, ignored N block(s)`，
+  任务报告末尾也会写一行 `Prompt note: N block(s) after the divider were NOT part of
+  this run's instructions.`。看到这行就说明你补的说明没被读到。
+- 读 prompt 时会**翻页**（每页 100 块），所以 divider 落在第 100 块之后也能被正确识别。
+- **Status 一旦变成 Queued，这次执行的意图就冻结了。** 要改需求请**新建一行任务（新 TaskID）**，
+  不要改正文：divider 之后写的内容不属于本次执行，改 divider 以上也会让「同一 TaskID
+  跑了两种指令」，事后无法判断模型到底接受了哪一版。
 
 状态机（只有桥接服务和人工能改 Status，ChatGPT/Muse 只负责发 Queued 和读结果）：
 ```
@@ -46,6 +54,44 @@ Queued → Running → Done | Failed
 Queued → NeedsApproval →（人工把 Approval 改成 Approved，并把 Status 改回 Queued）→ Running
 任何时刻人工把 Status 改成 Cancelled → 桥接服务在 15 秒内杀掉子进程 → Cancelled
 ```
+
+### 写回与重跑：ledger 是执行事实，Notion 是可重试的投影
+
+本地 `data\ledger.json` 才是「这个任务跑没跑过」的真相，Notion 的 Status 只是它的投影。
+每次执行结束后，桥接服务**先把结果落到本地**，再去写 Notion：
+
+```
+executor 结束（成功 / 失败 / 取消）
+  → ledger: executionStatus=succeeded|failed|cancelled|unknown, syncStatus=properties_pending
+  → Notion 属性（Status / Tokens / ResultSummary / ChangedFiles / LogPath / Error）
+  → Notion 正文报告（首行是 `Run: <runId>` 标记）
+  → 全部成功：syncStatus=synced
+  → 属性写失败：syncStatus=writeback_pending + lastSyncError，executionStatus 不变
+```
+
+三条硬规则：
+
+- **写回失败不改变任务结论。** 已经成功的执行不会因为 Notion 写不进去而变成 Failed；
+  真实的失败原因也不会被「同步失败」的文本覆盖——后者只进 `lastSyncError`。
+- **写回失败不导致重跑。** 每次启动、每轮轮询之前都会先做对账（reconcile），
+  只补写回、不进执行器。日志里会看到
+  `reconcile: N terminal result(s) waiting for Notion writeback (no executor call)`。
+- **报告失败不算同步失败。** 报告是注释、不是结论：属性写成功即视为 synced。
+  报告带 `Run: <runId>` 标记，重试不会重复追加同一份报告。
+
+所以 `Status=Queued` 其实有两种含义，桥接服务靠 ledger 区分：
+
+| Notion | ledger | 行为 |
+|---|---|---|
+| Queued | 无记录 | 正常执行 |
+| Queued | 有终态但 `syncStatus` 是 pending | **只补同步**，绝不再调模型 |
+| Queued | 有终态且已 synced | 视为**人工要求的重跑**，重新执行 |
+| Queued | `status=running` 且进程还活着 | 跳过（另一个实例在跑） |
+
+旧版本 ledger（没有 `syncStatus` 字段）按「已同步」处理，不会重复写回；
+旧版本遗留的 `running` 条目仍然走原来的 recovered-unknown 路径，
+标记为「结果未知」，不会被升级成成功。
+
 
 ## 3. 读结果
 

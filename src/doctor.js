@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveExecutorCommand } from "./config.js";
 
 // One-click environment diagnosis. It never prints a secret, never runs a model,
 // and never writes outside data/ (it only reads config/.env presence).
@@ -38,10 +38,10 @@ async function main() {
   for (const dir of config.allowedWorkdirs) {
     checks.push({ check: `workdir exists: ${dir}`, detail: fs.existsSync(dir) ? "exists" : "MISSING — create it or fix config.json", ok: fs.existsSync(dir) });
   }
-  const codexCommand = config.executorPaths?.codex || "codex";
+  const codexCommand = resolveExecutorCommand(config, "codex");
   const codex = await runVersion(codexCommand, ["--version"]);
   checks.push({ check: "codex CLI available", detail: codex.detail, ok: codex.found });
-  const opencodeCommand = config.executorPaths?.opencode || "opencode";
+  const opencodeCommand = resolveExecutorCommand(config, "opencode");
   const opencode = await runVersion(opencodeCommand, ["--version"]);
   checks.push({ check: "opencode CLI available", detail: opencode.detail, ok: opencode.found });
   const git = await runVersion("git", ["--version"]);
