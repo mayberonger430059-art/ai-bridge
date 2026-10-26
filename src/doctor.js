@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, resolveExecutorCommand } from "./config.js";
+import { verifyExecutorVersion } from "./executor-identity.js";
 
 // One-click environment diagnosis. It never prints a secret, never runs a model,
 // and never writes outside data/ (it only reads config/.env presence).
@@ -39,14 +40,14 @@ async function main() {
     checks.push({ check: `workdir exists: ${dir}`, detail: fs.existsSync(dir) ? "exists" : "MISSING — create it or fix config.json", ok: fs.existsSync(dir) });
   }
   const codexCommand = resolveExecutorCommand(config, "codex");
-  const codex = await runVersion(codexCommand, ["--version"]);
-  checks.push({ check: "codex CLI available", detail: codex.detail, ok: codex.found });
+  const codex = verifyExecutorVersion("codex", await runVersion(codexCommand, ["--version"]), codexCommand);
+  checks.push({ check: "codex CLI available", detail: codex.detail, ok: codex.ok });
   const opencodeCommand = resolveExecutorCommand(config, "opencode");
-  const opencode = await runVersion(opencodeCommand, ["--version"]);
-  checks.push({ check: "opencode CLI available", detail: opencode.detail, ok: opencode.found });
+  const opencode = verifyExecutorVersion("opencode", await runVersion(opencodeCommand, ["--version"]), opencodeCommand);
+  checks.push({ check: "opencode CLI available", detail: opencode.detail, ok: opencode.ok });
   const git = await runVersion("git", ["--version"]);
   checks.push({ check: "git on PATH (for changed-files diff)", detail: git.detail, ok: git.found });
-  if (!codex.found && !opencode.found) {
+  if (!codex.ok && !opencode.ok) {
     checks.push({ check: "at least one executor available", detail: "neither codex nor opencode was found", ok: false });
   } else {
     checks.push({ check: "at least one executor available", detail: "ok", ok: true });
