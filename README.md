@@ -1,5 +1,7 @@
 # AI Bridge v0.1 — 最小可行桥接服务
 
+运行交接入口：[完整 RUNBOOK](docs/RUNBOOK.md) · [常驻方案（未部署）](docs/SERVICE-PLAN.md) · [真实业务与 ChatGPT/Muse 试点计划（未执行）](docs/PILOT-PLAN.md) · [本轮验证证据](docs/VERIFICATION-2026-10-26.md)。下文保留初版安装说明；运行状态及恢复操作以 RUNBOOK 对当前代码的说明为准。
+
 目标：最简单、最稳定、最低成本地让 ChatGPT / Muse（网页版）/ 本地 OpenCode / Codex
 通过 Notion 交换任务和成果。**不是**一个大系统：没有界面、没有插件市场、
 没有多智能体辩论、没有并行 agent 循环。一次只跑一个任务。
