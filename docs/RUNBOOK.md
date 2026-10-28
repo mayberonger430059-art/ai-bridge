@@ -4,17 +4,19 @@
 含糊的「最新版」不算数：opencode 从 1.19.4 到 2.1.4 已经悄悄删过 `--dir`，
 升级后直接接真实任务，失败会以「模型不听话」的样子出现，很难查回版本。
 
+> 公开文档中的安装路径均为占位符。实际路径和完整运行日志保存在本机私有配置与证据中，不提交到公共仓库。本手册不是发布批准记录；发布 PR 应附独立复审与验证证据。
+
 ## 1. 实测基线（2026-10-26，Windows 本机）
 
 | 组件 | 实测版本 | 路径 | 怎么测的 |
 |---|---|---|---|
-| opencode | `opencode v2.1.4` | `C:\Users\mr\AppData\Local\Programs\@opencodedesktop\resources\opencode-cli.exe` | `opencode-cli.exe --version` |
-| codex | `codex-cli 0.164.0-alpha.11.1` | `C:\Users\mr\.codex\.sandbox-bin\codex.exe` | `codex.exe --version` |
-| node | `v24.14.0` | `D:\Program Files\nodejs\node.exe` | `node --version` |
-| git | `2.53.0.windows.2` | `D:\Program Files\Git\cmd\git.exe` | `& 'D:\Program Files\Git\cmd\git.exe' --version` |
+| opencode | `opencode v2.1.4` | `<OpenCode 安装目录>\resources\opencode-cli.exe` | `opencode-cli.exe --version` |
+| codex | `codex-cli 0.164.0-alpha.11.1` | `<Codex 安装目录>\codex.exe` | `codex.exe --version` |
+| node | `v24.14.0` | `<Node.js 安装目录>\node.exe` | `node --version` |
+| git | `2.53.0.windows.2` | `<Git 安装目录>\cmd\git.exe` | `& '<Git 安装目录>\cmd\git.exe' --version` |
 
 `node src/doctor.js` 会把上面两行原样打印出来，并在方括号里带上**实际探测的二进制路径**
-（`[C:\...\opencode-cli.exe]`）：PATH 与 `executorPaths` 可能指向不同安装，
+（例如 `[<安装目录>\opencode-cli.exe]`）：PATH 与 `executorPaths` 可能指向不同安装，
 不打印路径就说不清 doctor 到底测的是哪一个。
 
 ### doctor 的身份校验（2026-10-26 起）
@@ -54,7 +56,7 @@
    FAIL 时不要往下走：先看 detail 里是「找不到」还是「不是 opencode」。
 4. **升级验收（两项，分开判定，不能互相替代）**
 
-   **4a. OpenCode 功能烟测**（一次真实调用）：在 `D:\AI-Bridge\test-workdir` 下跑一个 opencode 任务，
+   **4a. OpenCode 功能烟测**（一次真实调用）：在 `<隔离测试目录>` 下跑一个 opencode 任务，
    确认桥接调用能正常执行、`outcome=done`；Tokens 按 CLI 上报解析，无 usage 则如实记 `unknown`，不估算。
    **本步只证明「能跑通、输出能解析」，不验证只读安全**：当前 OpenCode 执行器没有强制只读沙箱，
    `WriteMode=read-only` 不能保证禁止写入（依据见第 2 节：opencode v2.1.4 的 `run` 没有只读/沙箱类参数）。
@@ -70,7 +72,7 @@
    两者验证的执行器不同，不能互相替代。没通过就回退到第 1 节记录的旧路径，把新版本号与报错写进本文件再讨论。
 
 **不要**升级完直接跑真实任务，也**不要**在报错后自动换 `opencodeMode` 重试——会重复扣费，
-而且第二次失败的原因会被第一次的噪音盖住。改配置后由人重新 `Queued`。
+而且第二次失败的原因会被第一次的噪音盖住。改配置后用新页面和新 TaskID 提交新任务；已执行旧单回写失败时只补同步，不通过改回 `Queued` 重跑。
 
 ## 4. 回退
 
